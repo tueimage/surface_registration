@@ -81,10 +81,8 @@ int main(int argc, char* argv[])
     Polyhedron original;
     CGAL::copy_face_graph(sm1, original);
     PM originalcoord = get(CGAL::vertex_point, original);
-
     Polyhedron brainmesh1;
     CGAL::copy_face_graph(sm1, brainmesh1);
-    CGAL::draw(brainmesh1);
 
     //Brain 2
     Mesh sm2;
@@ -92,7 +90,13 @@ int main(int argc, char* argv[])
     CGAL::read_ply(in2, sm2);
     Polyhedron brainmesh2;
     CGAL::copy_face_graph(sm2, brainmesh2);
-    CGAL::draw(brainmesh2);
+    Tree treebrain2(faces(brainmesh2).first, faces(brainmesh2).second, brainmesh2);
+    //Compute normals for each vertex
+    std::map<face_descriptor, Vector> fnormals;
+    std::map<vertex_descriptor, Vector> vnormals;
+    CGAL::Polygon_mesh_processing::compute_normals(brainmesh2,
+        boost::make_assoc_property_map(vnormals),
+        boost::make_assoc_property_map(fnormals));
     #pragma endregion
 
     #pragma region Rigid Registration of Brains
@@ -130,10 +134,14 @@ int main(int argc, char* argv[])
     std::cout << "Learning rate: ";
     std::cin >> learningrate;
     int number_of_rings;
-    std::cout << "Number of rings in ROI: ";
+    std::cout << "Number of rings in ROI (minimum of 2): ";
     std::cin >> number_of_rings;
-    double alfa = 0.1; //Literatuur waardes
+    if (number_of_rings < 2) {
+        number_of_rings = 2;
+    }
+    double alfa = 1; //Literatuur waardes
     double beta = 0.1; //Literatuur waardes
+    double gamma = 0.1; //Literatuur waardes
     double stopcriterion = 0.0001; //Literatuur waardes (0) wat is klein genoeg
     #pragma endregion
 
@@ -147,13 +155,6 @@ int main(int argc, char* argv[])
         std::cout << std::endl;
         std::cout << "Epoch: " << Epoch << std::endl;
 
-        //Compute normals for each vertex
-        std::map<face_descriptor, Vector> fnormals;
-        std::map<vertex_descriptor, Vector> vnormals;
-        CGAL::Polygon_mesh_processing::compute_normals(brainmesh1,
-            boost::make_assoc_property_map(vnormals),
-            boost::make_assoc_property_map(fnormals));
-
         //Loop over all vertices in brain1
         double progress = 0;
         double thresh = brainmesh1.size_of_vertices() / 100;
@@ -162,6 +163,15 @@ int main(int argc, char* argv[])
         std::vector<double> Data_Errorlist;
         std::vector<double> Stiffness_Errorlist;
         std::vector<double> Landmark_Errorlist;
+
+        PM coord1 = get(CGAL::vertex_point, brainmesh1);
+        std::vector<Surface_mesh_deformation::Point> plistdef;
+        std::vector<vertex_descriptor> verlistdef;
+        for (int i = 0; i < brainmesh1.size_of_vertices(); i++) {
+            verlistdef.push_back(*std::next(vb1, i));
+            Surface_mesh_deformation::Point p = get(coord1, *std::next(vb1, i));
+            plistdef.push_back(p);
+        }
 
         for (int i = 0; i < 1; i++) {
 
@@ -184,6 +194,7 @@ int main(int argc, char* argv[])
 
             vertex_descriptor control_1 = *std::next(vb1, i);
 
+            //Create ROI
             int ROI_rings = 0;
             std::vector <vertex_descriptor> ROI;
             ROI.push_back(control_1);
@@ -200,58 +211,94 @@ int main(int argc, char* argv[])
 
             deform_mesh.insert_roi_vertices(ROI.begin(), ROI.end());
 
-            PM coord1 = get(CGAL::vertex_point, brainmesh1);
-            Surface_mesh_deformation::Point p1 = get(coord1, control_1);
+            //Select control points
+            int control_rings = 0;
+            std::vector <vertex_descriptor> controlpointlist;
+            controlpointlist.push_back(control_1);
+            while (control_rings < (number_of_rings - 1)) {
+                std::vector <vertex_descriptor> controlappender = controlpointlist;
+                for (int controlindex = 0; controlindex < controlpointlist.size(); ++controlindex) {
+                    adjacent_vertices(brainmesh1, controlpointlist[controlindex], std::back_inserter(controlappender));
+                    std::sort(controlappender.begin(), controlappender.end());
+                    controlappender.erase(std::unique(controlappender.begin(), controlappender.end()), controlappender.end());
+                }
+                controlpointlist = controlappender;
+                ++control_rings;
+            }
 
-            deform_mesh.insert_control_vertex(control_1);
+            deform_mesh.insert_control_vertices(controlpointlist.begin(), controlpointlist.end());
 
-            //brainmesh2 is target
             bool is_matrix_factorization_OK = deform_mesh.preprocess();
             if (!is_matrix_factorization_OK) {
                 std::cerr << "Error in preprocessing, check documentation of preprocess()" << std::endl;
-                return 1;
-            }
-            //Algorithm to slowly converge to mesh2 over the normal of each vertex
-            Vector vertexnormal = vnormals[control_1];
-
-            CGAL::Side_of_triangle_mesh<Polyhedron, Kernel> inside(brainmesh2);
-            CGAL::Bounded_side pointinside = inside(p1);
-
-            Surface_mesh_deformation::Point endpoint;
-
-            if (pointinside == CGAL::ON_BOUNDED_SIDE) {
-                endpoint = Surface_mesh_deformation::Point(p1.x() + vertexnormal.x() * learningrate, p1.y() + vertexnormal.y() * learningrate, p1.z() + vertexnormal.z() * learningrate);
-            }
-            else if (pointinside == CGAL::ON_BOUNDARY) {
-                endpoint = p1;
-            }
-            else {
-                endpoint = Surface_mesh_deformation::Point(p1.x() - vertexnormal.x() * learningrate, p1.y() - vertexnormal.y() * learningrate, p1.z() - vertexnormal.z() * learningrate);
+                return EXIT_FAILURE;
             }
 
-            deform_mesh.set_target_position(control_1, endpoint); // Change position of the vertix
+            Surface_mesh_deformation::Point p1;
+            for (int k = 0; k < controlpointlist.size(); ++k) {
+                for (int l = 0; l < verlistdef.size(); ++l) {
+                    if (verlistdef[l] == controlpointlist[k]) {
+                        p1 = plistdef[l];
+                    }
+                }
+                //Algorithm to slowly converge to mesh2 over the normal of each vertex
+                vertex_descriptor closestpoint;
+                closestpoint = treebrain2.closest_point_and_primitive(p1).second->halfedge()->vertex();
+                Vector vertexnormal = vnormals[closestpoint];
+
+                CGAL::Side_of_triangle_mesh<Polyhedron, Kernel> inside(brainmesh2);
+                CGAL::Bounded_side pointinside = inside(p1);
+
+                Surface_mesh_deformation::Point endpoint;
+
+                if (pointinside == CGAL::ON_BOUNDED_SIDE) {
+                    endpoint = Surface_mesh_deformation::Point(p1.x() + vertexnormal.x() * learningrate, p1.y() + vertexnormal.y() * learningrate, p1.z() + vertexnormal.z() * learningrate);
+                }
+                else if (pointinside == CGAL::ON_BOUNDARY) {
+                    endpoint = p1;
+                }
+                else {
+                    endpoint = Surface_mesh_deformation::Point(p1.x() - vertexnormal.x() * learningrate, p1.y() - vertexnormal.y() * learningrate, p1.z() - vertexnormal.z() * learningrate);
+                }
+
+                deform_mesh.set_target_position(controlpointlist[k], endpoint); // Change position of the vertix
+            }
+
             deform_mesh.deform();
+
+            deform_mesh.overwrite_initial_geometry();
+            deform_mesh.clear_roi_vertices();
+            deform_mesh.clear_control_vertices();
+        }
+
         //loop over the vertices again to calculate the error for this epoch
+        for (int i=0; i<brainmesh1.size_of_vertices(); ++i){
+            vertex_descriptor current_point = *std::next(vb1, i);
+
             //Data Error for the ROI for each vertex
             PM newcoord1 = get(CGAL::vertex_point, brainmesh1);
-            Surface_mesh_deformation::Point newp1 = get(newcoord1, control_1);
-            Tree treebrain2(faces(brainmesh2).first, faces(brainmesh2).second, brainmesh2);
-            Surface_mesh_deformation::Point closestpoint = treebrain2.closest_point(newp1);
+            Surface_mesh_deformation::Point newp1 = get(newcoord1, current_point); 
             FT mindistancesqd = treebrain2.squared_distance(newp1);
             double Data_Error = mindistancesqd;
             Data_Errorlist.push_back(Data_Error);
 
             //Stiffness Error for the ROI
+            Surface_mesh_deformation::Point p1;
+            for (int l = 0; l < verlistdef.size(); ++l) {
+                if (verlistdef[l] == *std::next(vb1, i)) {
+                    Surface_mesh_deformation::Point p1 = plistdef[l];
+                }
+            }
             std::tuple<double, double, double> Tcenter = std::make_tuple(newp1.x() - p1.x(), newp1.y() - p1.y(), newp1.z() - p1.z());
             std::vector<vertex_descriptor> adjacentv;
-            adjacent_vertices(brainmesh1, control_1, std::back_inserter(adjacentv));
+            adjacent_vertices(brainmesh1, current_point, std::back_inserter(adjacentv));
             double Stiffness_Error = 0;
             //Compare with previous deformed mesh
             Surface_mesh_deformation::Point ap1;
             for (int s = 0; s != adjacentv.size(); s++) {
-                for (int k = 0; k < originalplist.size(); k++) {
-                    if (originalvertexlist[k] == adjacentv[s]) {
-                        ap1 = originalplist[k];
+                for (int k = 0; k < plistdef.size(); k++) {
+                    if (verlistdef[k] == adjacentv[s]) {
+                        ap1 = plistdef[k];
                     }
                 }
                 Surface_mesh_deformation::Point anewp1 = get(newcoord1, adjacentv[s]);
@@ -260,20 +307,20 @@ int main(int argc, char* argv[])
             }
             Stiffness_Errorlist.push_back(Stiffness_Error);
 
-            //Landmark Error
-            double Landmark_Error = 0;
-            Landmark_Errorlist.push_back(Landmark_Error);
-
-            deform_mesh.overwrite_initial_geometry();
-            deform_mesh.clear_roi_vertices();
-            deform_mesh.clear_control_vertices();
+            //Normal Error
+            //Comput normals on brainmesh 1 and 2, find closest points and compute the difference in normals.
+            Surface_mesh_deformation::Point closestpoint = treebrain2.closest_point(newp1);
+            double Normal_Error = 0;
+            Landmark_Errorlist.push_back(Normal_Error);
         }
+
         double Data_Errormean = std::accumulate(Data_Errorlist.begin(), Data_Errorlist.end(), 0.0) / Data_Errorlist.size();
         double Stiffness_Errormean = std::accumulate(Stiffness_Errorlist.begin(), Stiffness_Errorlist.end(), 0.0) / Stiffness_Errorlist.size();
         double Landmark_Errormean = std::accumulate(Landmark_Errorlist.begin(), Landmark_Errorlist.end(), 0.0) / Landmark_Errorlist.size();
 
-        Error = Data_Errormean + alfa * Stiffness_Errormean + beta * Landmark_Errormean;
+        Error = alfa * Data_Errormean + beta * Stiffness_Errormean + gamma * Landmark_Errormean;
         Errorlist.push_back(Error);
+        std::cout << std::endl;
         std::cout << "Error: " << Errorlist[Epoch] << std::endl;
 
         //DICE Score  
@@ -283,7 +330,6 @@ int main(int argc, char* argv[])
         Polyhedron comp_mesh;
         CGAL::copy_face_graph(brainmesh2, comp_mesh);       
         bool valid_intersection = CGAL::Polygon_mesh_processing::corefine_and_compute_intersection(def_mesh, comp_mesh, intersection_mesh);
-        std::cout << "No error" << std::endl;
         if (valid_intersection) {
             FT volume_mesh1 = CGAL::Polygon_mesh_processing::volume(def_mesh);
             FT volume_mesh2 = CGAL::Polygon_mesh_processing::volume(comp_mesh);
@@ -302,13 +348,7 @@ int main(int argc, char* argv[])
                 
         //Trigger stopcriterion
         if (Epoch > 0) {
-            if (Errorlist[Epoch] > Errorlist[Epoch - 1]) {
-                learningrate = learningrate / 2;
-                std::cout << "Error increase, step size lowered to: " << learningrate << std::endl;
-                Epoch++;
-                continue;
-            }
-            else if (std::abs(Errorlist[Epoch]-Errorlist[Epoch-1])<stopcriterion) {
+            if (std::abs(Errorlist[Epoch]-Errorlist[Epoch-1])<stopcriterion) {
                 std::cout << "Stop criterion reached, stop!" << std::endl;
 
                 for (int i = 0; i < brainmesh1.size_of_vertices(); i++) {
@@ -381,6 +421,12 @@ int main(int argc, char* argv[])
                 #pragma endregion
 
                 break;
+            }
+            if (Errorlist[Epoch] > Errorlist[Epoch - 1]) {
+                learningrate = learningrate / 2;
+                std::cout << "Error increase, step size lowered to: " << learningrate << std::endl;
+                Epoch++;
+                continue;
             }
             else {
                 Epoch++;
