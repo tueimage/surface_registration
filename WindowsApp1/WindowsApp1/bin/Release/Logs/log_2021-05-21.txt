@@ -1,0 +1,7 @@
+2021-05-21 18:16:09	Starting Algorithm!
+2021-05-21 18:16:09	Rigid registration of brains!
+2021-05-21 18:16:12	Epochs: 100
+2021-05-21 18:16:12	Learning rate: 1.000000
+2021-05-21 18:16:13	Number of rings in controlpoints: 1
+
+2021-05-21 18:16:13	Epoch: 0
