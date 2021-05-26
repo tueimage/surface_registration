@@ -1,0 +1,5 @@
+C:/Users/20181933/Documents/Jaar_3/Kwartiel_4/BEP_Medical_Imaging/Segmentations/Patient1Seg5.ply
+C:/Users/20181933/Documents/Jaar_3/Kwartiel_4/BEP_Medical_Imaging/Segmentations/Patient2Seg5.ply
+100
+1
+1

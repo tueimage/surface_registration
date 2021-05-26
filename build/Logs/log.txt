@@ -1,0 +1,22 @@
+2021-05-26 19:54:03	Starting Algorithm!
+
+2021-05-26 19:54:03	Rigid registration starting!
+2021-05-26 19:54:04	Orientation of brains aligned!
+2021-05-26 19:54:04	Registration time: 1.245000 seconds.
+
+2021-05-26 19:54:05	Deformation settings
+2021-05-26 19:54:05	Epochs: 100
+2021-05-26 19:54:05	Number of rings in controlpoints: 1
+2021-05-26 19:54:05	Learning rate: 1.000000
+
+2021-05-26 19:54:05	Epoch: 0
+2021-05-26 20:04:52	Error: 159010.781124
+2021-05-26 20:04:52	Epoch time: 647.083000 seconds.
+2021-05-26 20:04:52	Stop criterion not reached, continue!
+
+2021-05-26 20:04:52	Epoch: 1
+2021-05-26 20:14:34	Error: 10047756.669504
+2021-05-26 20:14:34	Epoch time: 582.032000 seconds.
+2021-05-26 20:14:34	Error increase, step size lowered to: 0.500000
+
+2021-05-26 20:14:34	Epoch: 2
